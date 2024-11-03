@@ -1,42 +1,50 @@
-use redis::{Commands, Connection};
+use redis::{Connection, RedisResult};
 
-//fn do_something(con: &mut Connection) -> redis::RedisResult<()> {
-    // Use the raw Redis command style with `cmd` and `execute`
-  //redis::cmd("SET").arg("my_key").arg(42).execute(con);
-//    println!("Set key 'my_key' to 42");
-
-  //  Ok(())
-//}
-
-fn store_location(con: &mut Connection,
-    key: &str, name: &str, longitude:f64, 
-    latitude:f64) -> redis::RedisResult<()> {
-
+fn store_driver_location(con: &mut Connection, driver_id: &str, longitude: f64, latitude: f64) -> RedisResult<()> {
     redis::cmd("GEOADD")
-        .arg(key)
+        .arg("drivers")
         .arg(longitude)
         .arg(latitude)
-        .arg(name)
-        .execute(con);
+        .arg(driver_id)
+        .exec(con)?;
+    println!("Stored location for driver '{}'", driver_id);
 
-        println!("Stored location for '{}'", name);
-
-        Ok(())
+    Ok(())
 }
 
-fn main() -> redis::RedisResult<()> {
+fn get_driver_location(con: &mut Connection, driver_id: &str) -> RedisResult<Option<(f64, f64)>> {
+    // Query the location using GEOPOS
+    let location: Option<Vec<Option<Vec<String>>>> = redis::cmd("GEOPOS")
+        .arg("drivers")
+        .arg(driver_id)
+        .query(con)?;
+
+    // Parse the nested vector structure to extract longitude and latitude
+    if let Some(Some(coords)) = location.and_then(|v| v.into_iter().next()) {
+        if coords.len() == 2 {
+            if let (Ok(longitude), Ok(latitude)) = (coords[0].parse::<f64>(), coords[1].parse::<f64>()) {
+                return Ok(Some((longitude, latitude)));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+fn main() -> RedisResult<()> {
     // Connect to Redis
     let client = redis::Client::open("redis://127.0.0.1/")?;
     let mut con = client.get_connection()?;
 
-    // Call the `do_something` function with the connection
-   // do_something(&mut con)?;
+    // Store the driver's location
+    store_driver_location(&mut con, "driver_1", 12.9716, 77.5946)?;
 
-    // Optionally, retrieve and print the value to verify
-    //let value: i32 = con.get("my_key")?;
-    //println!("The value of 'my_key' is: {}", value);
-
-    store_location(&mut con, "location", "driver", 12.9716, 77.5946)?;
+    // Get the location of the driver
+    if let Some((longitude, latitude)) = get_driver_location(&mut con, "driver_1")? {
+        println!("Driver location: longitude = {}, latitude = {}", longitude, latitude);
+    } else {
+        println!("Driver location not found");
+    }
 
     Ok(())
 }
